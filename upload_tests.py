@@ -1,3 +1,6 @@
+import json
+import requests as _requests
+import sys as _sys
 import os
 import sys
 import requests
@@ -8,14 +11,13 @@ import codePost_api as codePost
 api_key = os.environ["cp_api_key"]
 course_name = 'New course'
 course_period = '2019'
-student_email = sys.argv[1]
-assignment_name = sys.argv[2]
 
 # NOTE: THIS SHOULD BE EDITED BY USER BASED ON DESIRED BEHAVIOR. File name for codePost
 test_output_file_name = "Output.txt"
 
-import sys as _sys
-import requests as _requests
+
+api_key = "c0f0e3594c99b2e58a46cf3fc97538385c28eae0"
+>>>>>>> upstream/master
 
 try:
     # Python 2
@@ -93,7 +95,8 @@ class UploadModes(_DocEnum):
 
         "addFiles": False,
         "updateExistingFiles": False,
-        "deleteUnspecifiedFiles" : False,
+        "deleteUnspecifiedFiles": False,
+
 
         "removeComments": False,
         "doUnclaim": False,
@@ -111,7 +114,7 @@ class UploadModes(_DocEnum):
 
         "addFiles": True,
         "updateExistingFiles": False,
-        "deleteUnspecifiedFiles" : False,
+        "deleteUnspecifiedFiles": False,
 
         "removeComments": False,
         "doUnclaim": False,
@@ -130,7 +133,8 @@ class UploadModes(_DocEnum):
 
         "addFiles": True,
         "updateExistingFiles": True,
-        "deleteUnspecifiedFiles" : False,
+        "deleteUnspecifiedFiles": False,
+
 
         "removeComments": False,
         "doUnclaim": False,
@@ -152,7 +156,7 @@ class UploadModes(_DocEnum):
 
         "addFiles": True,
         "updateExistingFiles": True,
-        "deleteUnspecifiedFiles" : True,
+        "deleteUnspecifiedFiles": True,
 
         "removeComments": True,
         "doUnclaim": True,
@@ -172,7 +176,7 @@ class UploadModes(_DocEnum):
 
         "addFiles": True,
         "updateExistingFiles": True,
-        "deleteUnspecifiedFiles" : True,
+        "deleteUnspecifiedFiles": True,
 
         "removeComments": True,
         "doUnclaim": False,
@@ -183,6 +187,7 @@ class UploadModes(_DocEnum):
 
 
 DEFAULT_UPLOAD_MODE = UploadModes.DIFFSCAN
+
 
 def upload_test_output(api_key, course_name, course_period, student_email, assignment_name, test_output):
     # Find Assignment
@@ -199,19 +204,19 @@ def upload_test_output(api_key, course_name, course_period, student_email, assig
     # Parse the test output to the format desired to upload to codePost
     test_output_to_be_uploaded = parse_test_output(test_output)
 
-    # Upload test output to codePost
-    # new_file = codePost.post_file(api_key, sub[0]['id'], test_output_file_name, str(
-    #     test_output_to_be_uploaded), "txt")
+    file_to_upload = {"name": test_output_file_name,"code": test_output_to_be_uploaded, "extension": "txt"}
 
-    file_to_upload = {"name": test_output_file_name,
-                      "code": test_output_to_be_uploaded, "extension": "txt"}
-    upload = codePost.upload_submission(api_key, assn, [student_email], [
-                                        file_to_upload], mode=DEFAULT_UPLOAD_MODE)
+    upload = codePost.upload_submission(api_key, assn, [student_email], [file_to_upload], mode=DEFAULT_UPLOAD_MODE)
+
+    submission = codePost.get_assignment_submissions(api_key, assn['id'], student=student_email)
+
+    file = codePost.get_file(api_key, submission[-1]['files'][-1])
+
     print(
         "Test output successfully updated. Check it out on codePost at www.codepost.io/grade/{sub}".format(sub=sub[0]['id']))
-    # Add comments to file
-    # add_comments(api_key, test_output, new_file)
-    add_comments(api_key, test_output, upload)
+
+    add_comments(api_key, test_output, file)
+
     print(
         "Comments succesfully added. Check it out on codePost at www.codepost.io/grade/{sub}".format(sub=sub[0]['id']))
 
@@ -239,17 +244,90 @@ def add_comments(api_key, test_output, file):
     # example: posts a comment for each failed test
     # syntax: post_comment(api_key, file, text, pointDelta, startChar, endChar, startLine, endLine, rubricComment=None)
     # pointDelta is parsed as a negative. e.g., a pointDelta of 1 is -1 on codePost'
-    test_by_q = test_output.split("Question")
+    test_by_q = test_output.split('ok.grade("')
     line_counter = 0
     for i in test_by_q:
         if ("k.." in i):  # indicator that a single test failed
             comment_text = "### Question {question} has a failed test.".format(
-                question=i[:4])
+                question=i.split('"')[0])
             codePost.post_comment(
                 api_key, file, comment_text, 1, 0, 10, line_counter, line_counter)
         line_counter += len(i.split("\n"))-1
 
 
+def get_output(notebook_data):
+    test_output = ""
+    for cell in notebook_data["cells"]:
+        source = cell["source"]
+        for line in source:
+            if('ok.grade("q' in line):
+                for output in cell["outputs"]:
+                    test_output += line + '\n' + ''.join(output["text"])
+    return test_output
+
+
+def getAssignmentData(assignment_name):
+    """ Get assignment for given assignemnt name """
+    assignment = codePost.get_assignment_info_by_name(
+        api_key, course_name, course_period, assignment_name)
+    if(not assignment):
+        raise Exception(
+            "No Assignment found with the given name and course info. Please check to make sure the name is correct.")
+    else:
+        return assignment
+
+
+def processAllNotebooks(output_dir, assignment_name):
+    """ Processes all notebooks in input directory for the assignment name
+    and saves them to ouput directory
+    """
+    for file in os.listdir(output_dir):
+        if(file.endswith(".ipynb")):
+            try:
+                print("Uploading Tests for: " + file + " 🤔")
+                filepath = output_dir + '/' + file
+
+                idx = file.rfind("_")
+                student_email = file[:idx]
+
+                test_output = processNotebook(
+                    filepath, student_email, assignment_name)
+
+                upload_test_output(api_key, course_name, course_period,
+                                student_email, assignment_name, test_output)
+
+                print(file + " has test output uploaded! 🎊")
+            except Exception as e:
+                print("❌!!ERROR!!❌:" + str(e))
+
+
+def processNotebook(notebook_path, student_email, assignment_name):
+    """ Processes the notebook to comment/delete okpy lines, and adds cell containing the
+    autograder snippet
+    """
+    with open(notebook_path, 'r') as json_file:
+        notebook_data = json.load(json_file)
+
+    test_output = get_output(notebook_data)
+
+    return test_output
+
+
+def startProcess(output_dir, assignment_name):
+    """ Runs all of the processing """
+    assignment = getAssignmentData(assignment_name)
+    processAllNotebooks(output_dir, assignment["name"])
+
+
+def checkSysArgs():
+    """ Checks to see if the right amount of parameters are passed by command line """
+    if len(sys.argv) < 3:
+        raise Exception(
+            "There are missing parameters. The following are necessary Input Directory, Output Direcory, Assignment Name")
+
+
 if __name__ == "__main__":
-    upload_test_output(api_key, course_name, course_period,
-                       student_email, assignment_name, test_output)
+
+    checkSysArgs()
+    output_dir, assignment_name, *rest = sys.argv[1:]
+    startProcess(output_dir, assignment_name)
